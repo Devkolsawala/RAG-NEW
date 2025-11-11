@@ -1,12 +1,17 @@
 """
 Enhanced Flask Web Application for Document Q&A System
-Features: BGE embeddings, Multiple LLM support, Streaming responses, General Chat Mode
+Features: BGE embeddings, Multiple LLM support, Streaming responses, General Chat Mode, Auto Ollama startup
 Run with: python main.py
 Access at: http://localhost:5000
 """
 
 import os
 import json
+import subprocess
+import platform
+import time
+import threading
+import atexit
 from pathlib import Path
 from flask import Flask, render_template, request, jsonify, Response, stream_with_context
 from werkzeug.utils import secure_filename
@@ -16,7 +21,6 @@ from sentence_transformers import SentenceTransformer
 import ollama
 import PyPDF2
 from typing import List, Dict, Generator
-import time
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = './uploads'
@@ -26,6 +30,98 @@ app.config['ALLOWED_EXTENSIONS'] = {'pdf', 'txt', 'md', 'docx'}
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 qa_system = None
+ollama_process = None
+
+
+class OllamaManager:
+    """Manage Ollama server lifecycle"""
+    
+    def __init__(self):
+        self.process = None
+        self.is_running = False
+        
+    def is_ollama_installed(self):
+        """Check if Ollama is installed"""
+        try:
+            result = subprocess.run(['ollama', '--version'], 
+                                  capture_output=True, 
+                                  text=True, 
+                                  timeout=5)
+            return result.returncode == 0
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return False
+    
+    def is_ollama_running(self):
+        """Check if Ollama server is already running"""
+        try:
+            ollama.list()
+            return True
+        except Exception:
+            return False
+    
+    def start_ollama(self):
+        """Start Ollama server"""
+        if not self.is_ollama_installed():
+            print("❌ Ollama is not installed!")
+            print("📥 Please install Ollama from: https://ollama.ai")
+            return False
+        
+        if self.is_ollama_running():
+            print("✅ Ollama server is already running")
+            self.is_running = True
+            return True
+        
+        print("🚀 Starting Ollama server...")
+        
+        try:
+            # Start Ollama serve in background
+            if platform.system() == 'Windows':
+                self.process = subprocess.Popen(
+                    ['ollama', 'serve'],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+            else:
+                self.process = subprocess.Popen(
+                    ['ollama', 'serve'],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    preexec_fn=os.setpgrp
+                )
+            
+            # Wait for server to start (max 30 seconds)
+            for i in range(30):
+                time.sleep(1)
+                if self.is_ollama_running():
+                    print("✅ Ollama server started successfully")
+                    self.is_running = True
+                    return True
+                print(f"⏳ Waiting for Ollama to start... ({i+1}/30)")
+            
+            print("❌ Ollama server failed to start within 30 seconds")
+            return False
+            
+        except Exception as e:
+            print(f"❌ Failed to start Ollama: {str(e)}")
+            return False
+    
+    def stop_ollama(self):
+        """Stop Ollama server if we started it"""
+        if self.process:
+            print("\n🛑 Stopping Ollama server...")
+            try:
+                self.process.terminate()
+                self.process.wait(timeout=5)
+                print("✅ Ollama server stopped")
+            except Exception as e:
+                print(f"⚠️  Error stopping Ollama: {str(e)}")
+                try:
+                    self.process.kill()
+                except:
+                    pass
+            self.process = None
+            self.is_running = False
 
 
 class EnhancedDocumentQASystem:
@@ -537,6 +633,19 @@ if __name__ == '__main__':
     print("=" * 70)
     print("🚀 Enhanced Document Q&A System with General Chat")
     print("=" * 70)
+    
+    # Initialize Ollama Manager
+    ollama_manager = OllamaManager()
+    
+    # Register cleanup on exit
+    atexit.register(ollama_manager.stop_ollama)
+    
+    # Start Ollama server
+    if not ollama_manager.start_ollama():
+        print("\n❌ Cannot proceed without Ollama server")
+        print("📥 Install from: https://ollama.ai")
+        exit(1)
+    
     print("\n⚡ Initializing with BGE embeddings and advanced features...")
     
     qa_system = EnhancedDocumentQASystem(model_name="mistral")
@@ -547,6 +656,7 @@ if __name__ == '__main__':
     print("   http://localhost:5000")
     print("=" * 70)
     print("\n💡 Features:")
+    print("   • Auto-start Ollama server")
     print("   • BGE embeddings (best quality)")
     print("   • Streaming responses (real-time)")
     print("   • Multiple model support")
@@ -555,4 +665,9 @@ if __name__ == '__main__':
     print("   • Enhanced UI with dark mode")
     print("\nPress Ctrl+C to stop\n")
     
-    app.run(debug=True, host='0.0.0.0', port=5000, threaded=True)
+    try:
+        app.run(debug=True, host='0.0.0.0', port=5000, threaded=True, use_reloader=False)
+    except KeyboardInterrupt:
+        print("\n👋 Shutting down gracefully...")
+    finally:
+        ollama_manager.stop_ollama()
