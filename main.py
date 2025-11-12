@@ -21,6 +21,8 @@ from sentence_transformers import SentenceTransformer
 import ollama
 import PyPDF2
 from typing import List, Dict, Generator
+import re
+from langdetect import detect, detect_langs
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = './uploads'
@@ -125,7 +127,7 @@ class OllamaManager:
 
 
 class EnhancedDocumentQASystem:
-    def __init__(self, persist_dir: str = "./chroma_db", model_name: str = "mistral"):
+    def __init__(self, persist_dir: str = "./chroma_db", model_name: str = "deepseek-r1:8b"):
         self.model_name = model_name
         print(f"🚀 Loading BGE embeddings (best quality)...")
         
@@ -146,6 +148,46 @@ class EnhancedDocumentQASystem:
         )
         
         print(f"✓ System ready with {self.collection.count()} chunks")
+    
+    def detect_language(self, text: str) -> str:
+        """Detect the language of the input text"""
+        try:
+            # Remove non-alphabetic characters for better detection
+            clean_text = re.sub(r'[^a-zA-Z\s\u0600-\u06FF\u4E00-\u9FFF\u0400-\u04FF]', '', text)
+            if len(clean_text.strip()) < 3:
+                return 'en'  # Default to English if text is too short
+            
+            detected_lang = detect(clean_text)
+            return detected_lang
+        except Exception as e:
+            print(f"⚠️  Language detection failed: {str(e)}, defaulting to English")
+            return 'en'
+    
+    def get_language_name(self, lang_code: str) -> str:
+        """Convert language code to language name"""
+        language_map = {
+            'en': 'English',
+            'es': 'Spanish',
+            'fr': 'French',
+            'de': 'German',
+            'it': 'Italian',
+            'pt': 'Portuguese',
+            'ru': 'Russian',
+            'ja': 'Japanese',
+            'ko': 'Korean',
+            'zh-cn': 'Simplified Chinese',
+            'zh-tw': 'Traditional Chinese',
+            'ar': 'Arabic',
+            'hi': 'Hindi',
+            'bn': 'Bengali',
+            'tr': 'Turkish',
+            'pl': 'Polish',
+            'nl': 'Dutch',
+            'vi': 'Vietnamese',
+            'th': 'Thai',
+            'he': 'Hebrew'
+        }
+        return language_map.get(lang_code, 'English')
     
     def chunk_text(self, text: str, chunk_size: int = 800, overlap: int = 100) -> List[str]:
         """Enhanced chunking with better boundary detection"""
@@ -280,9 +322,16 @@ class EnhancedDocumentQASystem:
     def general_chat_stream(self, question: str) -> Generator:
         """Stream response for general chat (no document context)"""
         try:
+            # Detect language of the question
+            detected_lang = self.detect_language(question)
+            lang_name = self.get_language_name(detected_lang)
+            
+            # Add language instruction to the prompt
+            language_instruction = f"\n\nIMPORTANT: Respond in {lang_name}. Match the language of the user's question."
+            
             stream = ollama.generate(
                 model=self.model_name,
-                prompt=question,
+                prompt=question + language_instruction,
                 stream=True
             )
             
@@ -328,7 +377,11 @@ class EnhancedDocumentQASystem:
             )
         context = "\n\n---\n\n".join(context_parts)
         
-        # Enhanced prompt with better instructions
+        # Detect language of the question
+        detected_lang = self.detect_language(question)
+        lang_name = self.get_language_name(detected_lang)
+        
+        # Enhanced prompt with better instructions and language constraint
         prompt = f"""You are a helpful AI assistant answering questions based on provided documents. Follow these rules:
 
 1. Answer ONLY using information from the context below
@@ -336,6 +389,7 @@ class EnhancedDocumentQASystem:
 3. Be specific and cite which document sections support your answer
 4. Use a natural, conversational tone
 5. If multiple documents have relevant info, synthesize them coherently
+6. IMPORTANT: Respond in {lang_name}. Match the language of the user's question.
 
 Context from documents:
 {context}
@@ -383,7 +437,12 @@ Provide a clear, accurate answer:"""
             for chunk in relevant_chunks
         ])
         
+        # Detect language of the question
+        detected_lang = self.detect_language(question)
+        lang_name = self.get_language_name(detected_lang)
+        
         prompt = f"""Based on the following document excerpts, answer the question. Only use information from the provided context.
+Respond in {lang_name}. Match the language of the user's question.
 
 Context:
 {context}
@@ -648,7 +707,7 @@ if __name__ == '__main__':
     
     print("\n⚡ Initializing with BGE embeddings and advanced features...")
     
-    qa_system = EnhancedDocumentQASystem(model_name="mistral")
+    qa_system = EnhancedDocumentQASystem(model_name="deepseek-r1:8b")
     
     print("\n✅ System ready!")
     print("\n" + "=" * 70)
