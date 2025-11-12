@@ -1176,7 +1176,7 @@
             for (let file of files) {
                 await uploadFile(file);
             }
-            loadDocuments();
+            await loadDocuments();
         }
 
         async function uploadFile(file) {
@@ -1212,12 +1212,13 @@
                 
                 if (!hasDocuments && currentMode === 'rag') {
                     currentMode = 'chat';
+                    updateModeUI();
+                } else if (hasDocuments) {
+                    updateModeUI();
                 }
                 
                 document.getElementById('docCount').textContent = docCount;
                 document.getElementById('chunkCount').textContent = data.total_chunks || 0;
-                
-                updateModeUI();
 
                 const listEl = document.getElementById('documentsList');
                 listEl.innerHTML = '';
@@ -1259,7 +1260,7 @@
 
                 if (response.ok) {
                     showNotification('success', 'Deleted', filename);
-                    loadDocuments();
+                    await loadDocuments();
                 } else {
                     showNotification('error', 'Error', 'Failed to delete document');
                 }
@@ -1277,7 +1278,7 @@
                 
                 if (data.success) {
                     showNotification('success', 'Cleared', 'All documents removed');
-                    loadDocuments();
+                    await loadDocuments();
                     currentMode = 'chat';
                     updateModeUI();
                     
@@ -1347,7 +1348,7 @@
                 }
                 attachedFiles = [];
                 updateAttachedFilesDisplay();
-                loadDocuments();
+                await loadDocuments();
             }
 
             if (!question) return;

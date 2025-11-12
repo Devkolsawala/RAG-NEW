@@ -127,7 +127,7 @@ class OllamaManager:
 
 
 class EnhancedDocumentQASystem:
-    def __init__(self, persist_dir: str = "./chroma_db", model_name: str = "deepseek-r1:8b"):
+    def __init__(self, persist_dir: str = "./chroma_db", model_name: str = "phi3:3.8b"):
         self.model_name = model_name
         print(f"🚀 Loading BGE embeddings (best quality)...")
         
@@ -707,7 +707,7 @@ if __name__ == '__main__':
     
     print("\n⚡ Initializing with BGE embeddings and advanced features...")
     
-    qa_system = EnhancedDocumentQASystem(model_name="deepseek-r1:8b")
+    qa_system = EnhancedDocumentQASystem(model_name="phi3:3.8b")
     
     print("\n✅ System ready!")
     print("\n" + "=" * 70)
