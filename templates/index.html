@@ -315,6 +315,7 @@
         .document-item:hover {
             border-color: var(--accent-primary);
             background: var(--accent-light);
+            transform: translateX(2px);
         }
 
         .document-info {
@@ -329,12 +330,15 @@
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+            display: flex;
+            align-items: center;
+            gap: 6px;
         }
 
         .document-meta {
             font-size: 11px;
             color: var(--text-tertiary);
-            margin-top: 2px;
+            margin-top: 4px;
         }
 
         .btn {
@@ -895,6 +899,20 @@
 
             <div class="sidebar-content">
                 <div class="section">
+                    <div class="section-title">Statistics</div>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-label">Documents</div>
+                            <div class="stat-value" id="docCount">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Chunks</div>
+                            <div class="stat-value" id="chunkCount">0</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section">
                     <div class="section-title">Your Documents</div>
                     <div class="documents-list" id="documentsList">
                         <div class="empty-state">
@@ -902,6 +920,12 @@
                             <p style="font-size: 13px;">No documents yet</p>
                         </div>
                     </div>
+                </div>
+
+                <div class="section" id="clearSection" style="display: none;">
+                    <button class="btn btn-danger btn-full" onclick="clearDatabase()" style="font-size: 12px;">
+                        🗑️ Clear All Documents
+                    </button>
                 </div>
             </div>
 
@@ -971,7 +995,6 @@
                             </button>
                         </div>
                         <input type="file" id="chatFileInput" accept=".pdf,.txt,.md" multiple style="display: none;">
-                        <div id="attachedFilesContainer" style="display: none; margin-top: 8px;"></div>
                     </div>
                 </div>
             </div>
@@ -1048,7 +1071,6 @@
 
         const chatFileInput = document.getElementById('chatFileInput');
         const questionInput = document.getElementById('questionInput');
-        let attachedFiles = [];
 
         // Auto-resize textarea
         questionInput.addEventListener('input', function() {
@@ -1067,40 +1089,18 @@
         });
 
         function handleChatFiles(files) {
-            for (let file of files) {
-                // Add to attached files list
-                if (!attachedFiles.find(f => f.name === file.name)) {
-                    attachedFiles.push(file);
-                }
-            }
-            updateAttachedFilesDisplay();
+            // Start uploading files immediately
+            uploadFilesImmediately(files);
             // Reset input so same file can be selected again
             chatFileInput.value = '';
         }
 
-        function updateAttachedFilesDisplay() {
-            const container = document.getElementById('attachedFilesContainer');
-            
-            if (attachedFiles.length === 0) {
-                container.style.display = 'none';
-                container.innerHTML = '';
-                return;
+        async function uploadFilesImmediately(files) {
+            for (let file of files) {
+                await uploadFile(file);
             }
-            
-            container.style.display = 'block';
-            container.innerHTML = '<div style="display: flex; gap: 8px; flex-wrap: wrap;">' +
-                attachedFiles.map((file, index) => `
-                    <div style="display: flex; align-items: center; gap: 6px; background: var(--accent-light); padding: 6px 10px; border-radius: 6px; font-size: 12px; color: var(--text-primary);">
-                        <span>📄 ${file.name}</span>
-                        <button onclick="removeAttachedFile(${index})" style="background: none; border: none; cursor: pointer; padding: 0; color: var(--text-primary); font-weight: bold;">×</button>
-                    </div>
-                `).join('') +
-            '</div>';
-        }
-
-        function removeAttachedFile(index) {
-            attachedFiles.splice(index, 1);
-            updateAttachedFilesDisplay();
+            // Reload documents after all uploads complete
+            await loadDocuments();
         }
 
         window.addEventListener('load', () => {
@@ -1176,6 +1176,7 @@
             for (let file of files) {
                 await uploadFile(file);
             }
+            // Reload documents list after all uploads complete
             await loadDocuments();
         }
 
@@ -1193,12 +1194,12 @@
 
                 const result = await response.json();
                 if (result.success) {
-                    showNotification('success', 'Success', `${result.filename} - ${result.chunks} chunks`);
+                    showNotification('success', '✓ Upload Complete', `${result.filename} (${result.chunks} chunks)`);
                 } else {
-                    showNotification('error', 'Error', result.error);
+                    showNotification('error', '✗ Upload Failed', result.error || 'Unknown error');
                 }
             } catch (error) {
-                showNotification('error', 'Upload Failed', error.message);
+                showNotification('error', 'Upload Error', error.message);
             }
         }
 
@@ -1217,8 +1218,17 @@
                     updateModeUI();
                 }
                 
+                // Update statistics
                 document.getElementById('docCount').textContent = docCount;
                 document.getElementById('chunkCount').textContent = data.total_chunks || 0;
+
+                // Show/hide clear all button
+                const clearSection = document.getElementById('clearSection');
+                if (docCount > 0) {
+                    clearSection.style.display = 'block';
+                } else {
+                    clearSection.style.display = 'none';
+                }
 
                 const listEl = document.getElementById('documentsList');
                 listEl.innerHTML = '';
@@ -1236,33 +1246,46 @@
                 data.documents.forEach(doc => {
                     const item = document.createElement('div');
                     item.className = 'document-item';
+                    const sizeKB = (doc.total_size / 1024).toFixed(1);
                     item.innerHTML = `
                         <div class="document-info">
-                            <div class="document-name" title="${doc.name}">${doc.name}</div>
-                            <div class="document-meta">${doc.chunks} chunks • ${(doc.total_size / 1024).toFixed(1)}KB</div>
+                            <div class="document-name" title="${doc.name}">📄 ${doc.name}</div>
+                            <div class="document-meta">${doc.chunks} chunks • ${sizeKB}KB</div>
                         </div>
-                        <button class="btn btn-ghost btn-small" onclick="deleteDocument('${doc.name}')">Delete</button>
+                        <button class="btn btn-ghost btn-small" onclick="deleteDocument('${doc.name}')" title="Delete this document">
+                            ✕
+                        </button>
                     `;
                     listEl.appendChild(item);
                 });
             } catch (error) {
                 console.error('Failed to load documents:', error);
+                const listEl = document.getElementById('documentsList');
+                listEl.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">❌</div>
+                        <p style="font-size: 12px; color: var(--danger);">Failed to load documents</p>
+                    </div>
+                `;
             }
         }
 
         async function deleteDocument(filename) {
-            if (!confirm(`Delete "${filename}"?`)) return;
+            if (!confirm(`Delete "${filename}"?\n\nThis will remove the document and all its indexed chunks.`)) return;
 
             try {
+                showNotification('info', 'Deleting...', `Removing ${filename}`);
+                
                 const response = await fetch(`/api/documents/${encodeURIComponent(filename)}`, {
                     method: 'DELETE'
                 });
 
                 if (response.ok) {
-                    showNotification('success', 'Deleted', filename);
+                    showNotification('success', 'Deleted', `${filename} removed successfully`);
                     await loadDocuments();
                 } else {
-                    showNotification('error', 'Error', 'Failed to delete document');
+                    const errorData = await response.json();
+                    showNotification('error', 'Failed to Delete', errorData.error || 'Unknown error');
                 }
             } catch (error) {
                 showNotification('error', 'Error', error.message);
@@ -1270,14 +1293,16 @@
         }
 
         async function clearDatabase() {
-            if (!confirm('Delete all documents? This cannot be undone.')) return;
+            if (!confirm('Delete ALL documents?\n\nThis action cannot be undone and will remove all indexed documents and chunks.')) return;
 
             try {
+                showNotification('info', 'Processing...', 'Clearing all documents');
+                
                 const response = await fetch('/api/clear', { method: 'POST' });
                 const data = await response.json();
                 
                 if (data.success) {
-                    showNotification('success', 'Cleared', 'All documents removed');
+                    showNotification('success', 'Cleared Successfully', 'All documents have been removed');
                     await loadDocuments();
                     currentMode = 'chat';
                     updateModeUI();
@@ -1295,7 +1320,7 @@
                         </div>
                     `;
                 } else {
-                    showNotification('error', 'Error', data.error || 'Failed to clear');
+                    showNotification('error', 'Error', data.error || 'Failed to clear documents');
                 }
             } catch (error) {
                 showNotification('error', 'Error', error.message);
@@ -1337,19 +1362,6 @@
 
             const input = document.getElementById('questionInput');
             const question = input.value.trim();
-
-            if (!question && attachedFiles.length === 0) return;
-
-            // Upload attached files before asking the question
-            if (attachedFiles.length > 0) {
-                showNotification('info', 'Uploading', `Processing ${attachedFiles.length} file(s)...`);
-                for (let file of attachedFiles) {
-                    await uploadFile(file);
-                }
-                attachedFiles = [];
-                updateAttachedFilesDisplay();
-                await loadDocuments();
-            }
 
             if (!question) return;
 
